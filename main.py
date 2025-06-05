@@ -15,29 +15,31 @@ DB_SOCKET   = os.environ.get("DB_SOCKET")   # ex) "/cloudsql/project:region:inst
 SECRET_KEY  = os.environ.get("JWT_SECRET", "change_this_in_prod")
 JWT_ALGO    = "HS256"
 
+import sys
+import traceback
+
 def get_db_connection():
-    """
-    Cloud Run 환경에서는 Unix domain socket으로 연결 권장:
-    host 파라미터 대신 unix_socket에 Cloud SQL 연결 이름을 넣는다.
-    """
-    if DB_SOCKET:
-        conn = mysql.connector.connect(
-            user=DB_USER,
-            password=DB_PASS,
-            database=DB_NAME,
-            unix_socket=DB_SOCKET,
-            auth_plugin='mysql_native_password'
-        )
-    else:
-        # 로컬 테스트 용 (예: Cloud SQL Auth Proxy 실행 시)
-        conn = mysql.connector.connect(
-            user=DB_USER,
-            password=DB_PASS,
-            database=DB_NAME,
-            host="127.0.0.1",
-            port=3306
-        )
-    return conn
+    try:
+        if DB_SOCKET:
+            return mysql.connector.connect(
+                user=DB_USER,
+                password=DB_PASS,
+                database=DB_NAME,
+                unix_socket=DB_SOCKET,
+                auth_plugin='mysql_native_password'
+            )
+        else:
+            return mysql.connector.connect(
+                user=DB_USER,
+                password=DB_PASS,
+                database=DB_NAME,
+                host="127.0.0.1",
+                port=3306
+            )
+    except mysql.connector.Error as err:
+        print("(!) DB 연결 실패", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise
 
 def generate_jwt(user_id, username, role):
     payload = {
