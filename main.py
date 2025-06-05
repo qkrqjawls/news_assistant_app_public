@@ -102,9 +102,6 @@ def register():
 
 @app.route("/login", methods=["POST"])
 def login():
-    """
-    JSON body: { "username": "...", "password": "..." }
-    """
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
@@ -112,24 +109,31 @@ def login():
     if not username or not password:
         return jsonify({"error": "username과 password가 필요합니다."}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT id, username, password_hash, role FROM users WHERE username=%s", (username,))
-    user = cursor.fetchone()
-    cursor.close()
-    conn.close()
+        cursor.execute("SELECT id, username, password_hash, role FROM users WHERE username=%s", (username,))
+        user = cursor.fetchone()
 
-    if not user:
-        return jsonify({"error": "유저 정보를 찾을 수 없습니다."}), 404
+        cursor.close()
+        conn.close()
 
-    # 비밀번호 검증
-    if not checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
-        return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 401
+        if not user:
+            return jsonify({"error": "유저 정보를 찾을 수 없습니다."}), 404
 
-    # JWT 발급
-    token = generate_jwt(user_id=user["id"], username=user["username"], role=user["role"])
-    return jsonify({"message": "로그인 성공", "access_token": token}), 200
+        if not checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+            return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 401
+
+        token = generate_jwt(user_id=user["id"], username=user["username"], role=user["role"])
+        return jsonify({"message": "로그인 성공", "access_token": token}), 200
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }), 500
 
 @app.route("/profile", methods=["GET"])
 def profile():
