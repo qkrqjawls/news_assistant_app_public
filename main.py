@@ -18,6 +18,20 @@ JWT_ALGO    = "HS256"
 import sys
 import traceback
 
+@app.route("/test-db")
+def test_db():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT NOW()")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return jsonify({"db_time": str(result[0])})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 def get_db_connection():
     try:
         if DB_SOCKET:
@@ -26,7 +40,6 @@ def get_db_connection():
                 password=DB_PASS,
                 database=DB_NAME,
                 unix_socket=DB_SOCKET,
-                auth_plugin='mysql_native_password'
             )
         else:
             return mysql.connector.connect(
