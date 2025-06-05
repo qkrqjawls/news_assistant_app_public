@@ -1,59 +1,144 @@
-from flask import Flask, jsonify, request
-from google.cloud import storage
-import json
+import os
+import datetime
+import mysql.connector
+from flask import Flask, request, jsonify
+from bcrypt import hashpw, gensalt, checkpw
+import jwt
 
 app = Flask(__name__)
 
-BUCKET_NAME = "news_assistant_main"
+# 환경변수로부터 설정 읽기 (Cloud Run 배포 시 환경변수로 세팅)
+DB_USER     = os.environ.get("DB_USER", "appuser")
+DB_PASS     = os.environ.get("DB_PASS", "secure_app_password")
+DB_NAME     = os.environ.get("DB_NAME", "myappdb")
+DB_SOCKET   = os.environ.get("DB_SOCKET")   # ex) "/cloudsql/project:region:instance"
+SECRET_KEY  = os.environ.get("JWT_SECRET", "change_this_in_prod")
+JWT_ALGO    = "HS256"
 
-@app.route('/read-message', methods=['GET'])
-def read_gcs_json():
-    try:
-        # GCS 클라이언트
-        client = storage.Client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob = bucket.blob("testdata.json")
-
-        # JSON 데이터 읽기
-        content = blob.download_as_text()
-        data = json.loads(content)
-
-        # my_message 키 반환
-        message = data.get("my_message", "Key 'my_message' not found")
-        return jsonify({"my_message": message})
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/write-test', methods=['POST'])
-def write_gcs_json():
-    try:
-        req_data = request.get_json(force=True)
-        message = req_data.get("my_message")
-
-        # 작성할 데이터
-        payload = {
-            "status": "success",
-            "my_message" : message
-        }
-
-        # GCS 클라이언트
-        client = storage.Client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob = bucket.blob("output.json")
-
-        # JSON 문자열로 변환해서 업로드
-        blob.upload_from_string(
-            data=json.dumps(payload),
-            content_type='application/json'
+def get_db_connection():
+    """
+    Cloud Run 환경에서는 Unix domain socket으로 연결 권장:
+    host 파라미터 대신 unix_socket에 Cloud SQL 연결 이름을 넣는다.
+    """
+    if DB_SOCKET:
+        conn = mysql.connector.connect(
+            user=DB_USER,
+            password=DB_PASS,
+            database=DB_NAME,
+            unix_socket=DB_SOCKET,
+            auth_plugin='mysql_native_password'
         )
+    else:
+        # 로컬 테스트 용 (예: Cloud SQL Auth Proxy 실행 시)
+        conn = mysql.connector.connect(
+            user=DB_USER,
+            password=DB_PASS,
+            database=DB_NAME,
+            host="127.0.0.1",
+            port=3306
+        )
+    return conn
 
-        return jsonify({"message": f"'output.json' written to GCS bucket '{BUCKET_NAME}'"})
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def generate_jwt(user_id, username, role):
+    payload = {
+        "sub": user_id,
+        "username": username,
+        "role": role,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=2)
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
+    return token
 
+@app.route("/register", methods=["POST"])
+def register():
+    """
+    JSON body: { "username": "...", "password": "...", "email": "..." }
+    """
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    email    = data.get("email")
 
-@app.route('/')
-def home():
-    return "GCS JSON Reader is running!"
+    if not username or not password or not email:
+        return jsonify({"error": "username, password, email 모두 필요합니다."}), 400
+
+    # 비밀번호 해시
+    pw_hash = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, email) VALUES (%s, %s, %s)",
+            (username, pw_hash, email)
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+    except mysql.connector.errors.IntegrityError as e:
+        # username이나 email이 중복된 경우 예외 발생
+        conn.rollback()
+        return jsonify({"error": "이미 존재하는 username 또는 email입니다."}), 409
+    finally:
+        cursor.close()
+        conn.close()
+
+    return jsonify({"message": "회원가입 성공", "user_id": new_id}), 201
+
+@app.route("/login", methods=["POST"])
+def login():
+    """
+    JSON body: { "username": "...", "password": "..." }
+    """
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "username과 password가 필요합니다."}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("SELECT id, username, password_hash, role FROM users WHERE username=%s", (username,))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not user:
+        return jsonify({"error": "유저 정보를 찾을 수 없습니다."}), 404
+
+    # 비밀번호 검증
+    if not checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+        return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 401
+
+    # JWT 발급
+    token = generate_jwt(user_id=user["id"], username=user["username"], role=user["role"])
+    return jsonify({"message": "로그인 성공", "access_token": token}), 200
+
+@app.route("/profile", methods=["GET"])
+def profile():
+    """
+    예시: Authorization: Bearer <JWT>
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
+
+    token = auth_header.split(" ")[1]
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+        # 예시 리턴: 사용자 정보
+        return jsonify({
+            "user_id": decoded["sub"],
+            "username": decoded["username"],
+            "role": decoded["role"]
+        })
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "토큰이 만료되었습니다."}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+
+if __name__ == "__main__":
+    # 로컬 테스트용
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
