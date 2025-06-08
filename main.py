@@ -4,8 +4,12 @@ import mysql.connector
 from flask import Flask, request, jsonify
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app)  # 모든 도메인에서 허용
+
 
 # 환경변수로부터 설정 읽기 (Cloud Run 배포 시 환경변수로 세팅)
 DB_USER     = os.environ.get("DB_USER", "appuser")
