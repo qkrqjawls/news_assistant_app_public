@@ -147,7 +147,7 @@ def login():
             token,
             max_age=2 * 3600,
             httponly=True,
-            secure=True,
+            secure=False, #배포시에 True로 돌리기
             samesite="Strict",
             path="/"
         )
