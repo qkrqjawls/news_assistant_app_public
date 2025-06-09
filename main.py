@@ -288,6 +288,66 @@ def user_categories():
 
     return jsonify({"message": "카테고리가 업데이트되었습니다."}), 200
 
+@app.route("/api/issues", methods=["GET"])
+def list_issues():
+    """
+    Query params:
+      - limit (int, default=20)
+      - offset (int, default=0)
+    Response:
+      [
+        {
+          "id": 8,
+          "date": "2025-06-08T12:09:35",
+          "issue_name": "다양한 주제의 사회 및 스포츠 뉴스",
+          "summary": "...",
+          "related_news": [
+            "54706f86490805050b9a33899ac5ab30",
+            "c85dfecbc59f9b1f5e69c62f0da51a33",
+            ...
+          ]
+        },
+        ...
+      ]
+    """
+    # 파라미터 파싱
+    try:
+        limit = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
+
+    sql = """
+      SELECT id,
+             `date`,
+             issue_name,
+             summary,
+             related_news_list
+      FROM issues
+      ORDER BY `date` DESC
+      LIMIT %s OFFSET %s
+    """
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(sql, (limit, offset))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    issues = []
+    for (iid, dt, name, summary, related_list) in rows:
+        # 문자열을 쉼표로 split → 리스트
+        related = related_list.split() if not related_list else related_list.split()
+        issues.append({
+            "id": iid,
+            "date": dt.isoformat(),
+            "issue_name": name,
+            "summary": summary,
+            "related_news": related
+        })
+
+    return jsonify(issues), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
