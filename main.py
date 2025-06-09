@@ -11,6 +11,7 @@ app = Flask(__name__)
 CORS(
     app,
     supports_credentials=True,
+    origins="*"  # dev 중이면 이 origin, 배포 때는 your.github.io
 )
 # 환경변수로부터 설정 읽기
 DB_USER     = os.environ.get("DB_USER", "appuser")
@@ -287,10 +288,33 @@ def user_categories():
 
     return jsonify({"message": "카테고리가 업데이트되었습니다."}), 200
 
-
 @app.route("/api/issues", methods=["GET"])
 def list_issues():
-    # 파라미터 파싱
+    """
+    Query params:
+      - limit (int, default=20)
+      - offset (int, default=0)
+    Response:
+      [
+        {
+          "id": 8,
+          "date": "2025-06-08T12:09:35",
+          "issue_name": "...",
+          "summary": "...",
+          "related_news": [
+            {
+              "id": "0b24a0406aba8fcd55442b10cffbb17e",
+              "title": "...",
+              "content": "...",
+              "published_at": "2025-06-08T23:49:00"
+            },
+            ...
+          ]
+        },
+        ...
+      ]
+    """
+    # 1) 파라미터 파싱
     try:
         limit = int(request.args.get("limit", 20))
         offset = int(request.args.get("offset", 0))
@@ -300,35 +324,30 @@ def list_issues():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1) issues 먼저 조회
+    # 2) issues 조회
     cursor.execute("""
-      SELECT id,
-             `date`,
-             issue_name,
-             summary,
-             related_news_list
+      SELECT id, `date`, issue_name, summary, related_news_list
       FROM issues
       ORDER BY `date` DESC
       LIMIT %s OFFSET %s
     """, (limit, offset))
     issue_rows = cursor.fetchall()
 
-    # 2) 모든 related_news ID 집계
-    all_rel_ids = set()
-    for (_, _, _, _, related_list) in issue_rows:
+    # 3) related_news_list에서 모든 ID 집계
+    all_ids = set()
+    for iid, dt, name, summary, related_list in issue_rows:
         if related_list:
-            all_rel_ids.update(related_list.split())
+            all_ids.update(related_list.split(','))  # 쉼표로 구분되어 있을 경우
 
-    # 3) news 테이블에서 한 번에 상세 조회
+    # 4) news 테이블에서 ID에 해당하는 레코드 한 번에 조회
     news_map = {}
-    if all_rel_ids:
-        # %s 포맷에 맞춰서 IN절 생성
-        format_strings = ",".join(["%s"] * len(all_rel_ids))
+    if all_ids:
+        placeholders = ",".join(["%s"] * len(all_ids))
         cursor.execute(f"""
-            SELECT id, title, content, published_at
-            FROM news
-            WHERE id IN ({format_strings})
-        """, tuple(all_rel_ids))
+          SELECT id, title, content, published_at
+          FROM news
+          WHERE id IN ({placeholders})
+        """, tuple(all_ids))
         for nid, title, content, pub in cursor.fetchall():
             news_map[nid] = {
                 "id": nid,
@@ -340,12 +359,13 @@ def list_issues():
     cursor.close()
     conn.close()
 
-    # 4) 결과 조립
+    # 5) 최종 응답 조립
     issues = []
     for iid, dt, name, summary, related_list in issue_rows:
-        rel_ids = related_list.split() if related_list else []
-        # 존재하지 않는 ID는 버리고, map된 뉴스 정보만 리턴
-        related_news = [news_map[nid] for nid in rel_ids if nid in news_map]
+        # ID 리스트로 변환
+        ids = related_list.split(',') if related_list else []
+        # 매핑된 뉴스 객체만 걸러서 추가
+        related_news = [news_map[n] for n in ids if n in news_map]
 
         issues.append({
             "id": iid,
@@ -356,3 +376,7 @@ def list_issues():
         })
 
     return jsonify(issues), 200
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
