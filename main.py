@@ -299,84 +299,55 @@ def list_issues():
         {
           "id": 8,
           "date": "2025-06-08T12:09:35",
-          "issue_name": "...",
+          "issue_name": "다양한 주제의 사회 및 스포츠 뉴스",
           "summary": "...",
           "related_news": [
-            {
-              "id": "0b24a0406aba8fcd55442b10cffbb17e",
-              "title": "...",
-              "content": "...",
-              "published_at": "2025-06-08T23:49:00"
-            },
+            "54706f86490805050b9a33899ac5ab30",
+            "c85dfecbc59f9b1f5e69c62f0da51a33",
             ...
           ]
         },
         ...
       ]
     """
-    # 1) 파라미터 파싱
+    # 파라미터 파싱
     try:
         limit = int(request.args.get("limit", 20))
         offset = int(request.args.get("offset", 0))
     except ValueError:
         return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # 2) issues 조회
-    cursor.execute("""
-      SELECT id, `date`, issue_name, summary, related_news_list
+    sql = """
+      SELECT id,
+             `date`,
+             issue_name,
+             summary,
+             related_news_list
       FROM issues
       ORDER BY `date` DESC
       LIMIT %s OFFSET %s
-    """, (limit, offset))
-    issue_rows = cursor.fetchall()
+    """
 
-    # 3) related_news_list에서 모든 ID 집계
-    all_ids = set()
-    for iid, dt, name, summary, related_list in issue_rows:
-        if related_list:
-            all_ids.update(related_list.split(','))  # 쉼표로 구분되어 있을 경우
-
-    # 4) news 테이블에서 ID에 해당하는 레코드 한 번에 조회
-    news_map = {}
-    if all_ids:
-        placeholders = ",".join(["%s"] * len(all_ids))
-        cursor.execute(f"""
-          SELECT id, title, content, published_at
-          FROM news
-          WHERE id IN ({placeholders})
-        """, tuple(all_ids))
-        for nid, title, content, pub in cursor.fetchall():
-            news_map[nid] = {
-                "id": nid,
-                "title": title,
-                "content": content,
-                "published_at": pub.isoformat()
-            }
-
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(sql, (limit, offset))
+    rows = cursor.fetchall()
     cursor.close()
     conn.close()
 
-    # 5) 최종 응답 조립
     issues = []
-    for iid, dt, name, summary, related_list in issue_rows:
-        # ID 리스트로 변환
-        ids = related_list.split(',') if related_list else []
-        # 매핑된 뉴스 객체만 걸러서 추가
-        related_news = [news_map[n] for n in ids if n in news_map]
-
+    for (iid, dt, name, summary, related_list) in rows:
+        # 문자열을 쉼표로 split → 리스트
+        related = related_list.split() if not related_list else related_list.split()
         issues.append({
             "id": iid,
             "date": dt.isoformat(),
             "issue_name": name,
             "summary": summary,
-            "related_news": related_news
+            "related_news": related
         })
 
     return jsonify(issues), 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
