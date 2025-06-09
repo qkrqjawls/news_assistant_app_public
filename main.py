@@ -2,7 +2,7 @@ import os
 import datetime
 import mysql.connector
 import traceback
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
@@ -68,9 +68,10 @@ def test_db():
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    username = data.get("username")
-    password = data.get("password")
-    email    = data.get("email")
+    username   = data.get("username")
+    password   = data.get("password")
+    email      = data.get("email")
+    categories = data.get("categories", [])
 
     if not username or not password or not email:
         return jsonify({"error": "username, password, email 모두 필요합니다."}), 400
@@ -81,15 +82,28 @@ def register():
     cursor = conn.cursor()
 
     try:
+        # users 테이블에 유저 저장
         cursor.execute(
             "INSERT INTO users (username, password_hash, email) VALUES (%s, %s, %s)",
             (username, pw_hash, email)
         )
         conn.commit()
         new_id = cursor.lastrowid
+
+        # user_categories 테이블에 카테고리 저장
+        for cat in categories:
+            cursor.execute(
+                "INSERT INTO user_categories (user_id, category) VALUES (%s, %s)",
+                (new_id, cat)
+            )
+        conn.commit()
+
     except mysql.connector.errors.IntegrityError:
         conn.rollback()
         return jsonify({"error": "이미 존재하는 username 또는 email입니다."}), 409
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
     finally:
         cursor.close()
         conn.close()
@@ -123,19 +137,37 @@ def login():
             return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 401
 
         token = generate_jwt(user_id=user["id"], username=user["username"], role=user["role"])
-        return jsonify({"message": "로그인 성공", "access_token": token}), 200
+        # HttpOnly 쿠키로 JWT 전송, 2시간 유효
+        resp = make_response(jsonify({"message": "로그인 성공"}), 200)
+        resp.set_cookie(
+            "access_token",
+            token,
+            max_age=2 * 3600,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            path="/"
+        )
+        return resp
 
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+@app.route("/logout", methods=["POST"])
+def logout():
+    # 쿠키 만료시켜 파기
+    resp = make_response(jsonify({"message": "로그아웃 성공"}), 200)
+    resp.set_cookie("access_token", "", max_age=0, path="/")
+    return resp
+
+
 @app.route("/profile", methods=["GET"])
 def profile():
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = request.cookies.get("access_token")
+    if not token:
         return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
 
-    token = auth_header.split(" ")[1]
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
@@ -162,10 +194,10 @@ def profile():
 
 @app.route("/api/user/profile", methods=["PUT"])
 def update_profile():
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = request.cookies.get("access_token")
+    if not token:
         return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
-    token = auth_header.split(" ")[1]
+
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
@@ -208,10 +240,10 @@ def update_profile():
 
 @app.route("/api/user/categories", methods=["GET", "PUT"])
 def user_categories():
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
-    token = auth_header.split(" ")[1]
+    token = request.cookies.get("access_token")
+    if not token:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
