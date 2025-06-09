@@ -11,7 +11,6 @@ app = Flask(__name__)
 CORS(
     app,
     supports_credentials=True,
-    origins="*"  # dev 중이면 이 origin, 배포 때는 your.github.io
 )
 # 환경변수로부터 설정 읽기
 DB_USER     = os.environ.get("DB_USER", "appuser")
