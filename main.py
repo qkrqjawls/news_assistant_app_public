@@ -290,83 +290,66 @@ def user_categories():
 
 @app.route("/api/issues", methods=["GET"])
 def list_issues():
-    """
-    Query params:
-      - limit (int, default=20)
-      - offset (int, default=0)
-    Response:
-      [
-        {
-          "id": 8,
-          "date": "2025-06-08T12:09:35",
-          "issue_name": "다양한 주제의 사회 및 스포츠 뉴스",
-          "summary": "...",
-          "related_news": [
-            {
-              "id": "54706f86490805050b9a33899ac5ab30",
-              "title": "...",
-              "content": "...",
-              "published_at": "2025-06-08T11:00:00"
-            },
-            ...
-          ]
-        },
-        ...
-      ]
-    """
-    # 1) 파라미터 파싱
     try:
-        limit = int(request.args.get("limit", 20))
-        offset = int(request.args.get("offset", 0))
-    except ValueError:
-        return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
+        # 1) 파라미터 파싱
+        try:
+            limit = int(request.args.get("limit", 20))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
+        # 2) issues 테이블에서 페이징 조회
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, `date`, issue_name, summary, related_news_list
+              FROM issues
+             ORDER BY `date` DESC
+             LIMIT %s OFFSET %s
+        """, (limit, offset))
+        issue_rows = cursor.fetchall()
 
-    # 2) issues 조회
-    cursor.execute("""
-      SELECT id, `date`, issue_name, summary, related_news_list
-      FROM issues
-      ORDER BY `date` DESC
-      LIMIT %s OFFSET %s
-    """, (limit, offset))
-    issue_rows = cursor.fetchall()
+        issues = []
+        # 3) 각 이슈마다 related_news_list → 상세 뉴스 조회 (N+1 방식)
+        for iid, dt, name, summary, related_list in issue_rows:
+            related_news = []
+            if related_list:
+                for nid in related_list.split(','):
+                    cursor.execute(
+                        "SELECT id, title, content, published_at FROM news WHERE id=%s",
+                        (nid,)
+                    )
+                    news_row = cursor.fetchone()
+                    if news_row:
+                        nid2, title, content, pub = news_row
+                        related_news.append({
+                            "id": nid2,
+                            "title": title,
+                            "content": content,
+                            "published_at": pub.isoformat()
+                        })
 
-    issues = []
-    # 3) 각 이슈마다 related_news_list 파싱 + 상세 뉴스 조회
-    for iid, dt, name, summary, related_list in issue_rows:
-        related_news = []
-        if related_list:
-            # ID 문자열이 "id1,id2,..." 형식이라면 split(',')
-            for nid in related_list.split(','):
-                # 뉴스 상세 조회
-                cursor.execute(
-                    "SELECT id, title, content, published_at FROM news WHERE id=%s",
-                    (nid,)
-                )
-                news_row = cursor.fetchone()
-                if news_row:
-                    nid2, title, content, pub = news_row
-                    related_news.append({
-                        "id": nid2,
-                        "title": title,
-                        "content": content,
-                        "published_at": pub.isoformat()
-                    })
+            issues.append({
+                "id": iid,
+                "date": dt.isoformat(),
+                "issue_name": name,
+                "summary": summary,
+                "related_news": related_news
+            })
 
-        issues.append({
-            "id": iid,
-            "date": dt.isoformat(),
-            "issue_name": name,
-            "summary": summary,
-            "related_news": related_news
-        })
+        cursor.close()
+        conn.close()
 
-    cursor.close()
-    conn.close()
+        return jsonify(issues), 200
 
-    return jsonify(issues), 200
+    except Exception as e:
+        # 서버 콘솔(또는 Cloud Run 로그)에 자세한 트레이스백 출력
+        traceback.print_exc()
+        # 클라이언트에 에러 메시지와 트레이스백을 JSON으로 반환
+        return jsonify({
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }), 500
 
 
 if __name__ == "__main__":
