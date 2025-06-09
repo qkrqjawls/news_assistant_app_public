@@ -8,8 +8,11 @@ from bcrypt import hashpw, gensalt, checkpw
 import jwt
 
 app = Flask(__name__)
-CORS(app)  # 모든 도메인에서 CORS 허용
-
+CORS(
+    app,
+    supports_credentials=True,
+    origins=["http://127.0.0.1:5500"]  # dev 중이면 이 origin, 배포 때는 your.github.io
+)
 # 환경변수로부터 설정 읽기
 DB_USER     = os.environ.get("DB_USER", "appuser")
 DB_PASS     = os.environ.get("DB_PASS", "secure_app_password")
