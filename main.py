@@ -138,21 +138,30 @@ def profile():
     token = auth_header.split(" ")[1]
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
-        # 이메일을 포함하려면 DB 조회 또는 token에 email 포함 필요
-        return jsonify({
-            "user_id": decoded["sub"],
-            "username": decoded["username"],
-            "role": decoded["role"]
-        })
     except jwt.ExpiredSignatureError:
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
 
+    user_id = decoded["sub"]
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT username, email, role FROM users WHERE id = %s",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "유저 정보를 찾을 수 없습니다."}), 404
+
+    return jsonify(row), 200
+
 
 @app.route("/api/user/profile", methods=["PUT"])
 def update_profile():
-    # 1) 인증
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
@@ -165,8 +174,6 @@ def update_profile():
         return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
 
     user_id = decoded["sub"]
-
-    # 2) 요청 데이터 파싱
     data = request.get_json()
     username = data.get("username")
     email    = data.get("email")
@@ -175,16 +182,13 @@ def update_profile():
     if not username or not email:
         return jsonify({"error": "username과 email은 필수입니다."}), 400
 
-    # 3) DB 업데이트
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # username, email
         cursor.execute(
             "UPDATE users SET username=%s, email=%s WHERE id=%s",
             (username, email, user_id)
         )
-        # password 변경 시
         if password:
             pw_hash = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
             cursor.execute(
@@ -220,35 +224,35 @@ def user_categories():
     cursor = conn.cursor()
 
     if request.method == "GET":
-        # 예시: categories를 저장한 테이블에서 불러오세요
-        cursor.execute("SELECT category FROM user_categories WHERE user_id=%s", (user_id,))
+        cursor.execute(
+            "SELECT category FROM user_categories WHERE user_id=%s",
+            (user_id,)
+        )
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        return jsonify({"categories": [r[0] for r in rows]})
+        return jsonify({"categories": [r[0] for r in rows]}), 200
 
-    else:  # PUT
-        data = request.get_json()
-        categories = data.get("categories", [])
-        # 기존 카테고리 삭제 & 새로 저장 로직
-        try:
-            cursor.execute("DELETE FROM user_categories WHERE user_id=%s", (user_id,))
-            for cat in categories:
-                cursor.execute(
-                    "INSERT INTO user_categories (user_id, category) VALUES (%s, %s)",
-                    (user_id, cat)
-                )
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            return jsonify({"error": str(e)}), 500
-        finally:
-            cursor.close()
-            conn.close()
+    # PUT
+    data = request.get_json()
+    categories = data.get("categories", [])
+    try:
+        cursor.execute("DELETE FROM user_categories WHERE user_id=%s", (user_id,))
+        for cat in categories:
+            cursor.execute(
+                "INSERT INTO user_categories (user_id, category) VALUES (%s, %s)",
+                (user_id, cat)
+            )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
-        return jsonify({"message": "카테고리가 업데이트되었습니다."}), 200
+    return jsonify({"message": "카테고리가 업데이트되었습니다."}), 200
 
 
 if __name__ == "__main__":
-    # 로컬 테스트용
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
