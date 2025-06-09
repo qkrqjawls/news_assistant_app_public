@@ -1,17 +1,16 @@
 import os
 import datetime
 import mysql.connector
+import traceback
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
-from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)  # 모든 도메인에서 CORS 허용
 
-CORS(app)  # 모든 도메인에서 허용
-
-
-# 환경변수로부터 설정 읽기 (Cloud Run 배포 시 환경변수로 세팅)
+# 환경변수로부터 설정 읽기
 DB_USER     = os.environ.get("DB_USER", "appuser")
 DB_PASS     = os.environ.get("DB_PASS", "secure_app_password")
 DB_NAME     = os.environ.get("DB_NAME", "myappdb")
@@ -19,22 +18,6 @@ DB_SOCKET   = os.environ.get("DB_SOCKET")   # ex) "/cloudsql/project:region:inst
 SECRET_KEY  = os.environ.get("JWT_SECRET", "change_this_in_prod")
 JWT_ALGO    = "HS256"
 
-import sys
-import traceback
-
-@app.route("/test-db")
-def test_db():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT NOW()")
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return jsonify({"db_time": str(result[0])})
-    except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 def get_db_connection():
     try:
@@ -53,10 +36,10 @@ def get_db_connection():
                 host="127.0.0.1",
                 port=3306
             )
-    except mysql.connector.Error as err:
-        print("(!) DB 연결 실패", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+    except mysql.connector.Error:
+        traceback.print_exc()
         raise
+
 
 def generate_jwt(user_id, username, role):
     payload = {
@@ -65,14 +48,25 @@ def generate_jwt(user_id, username, role):
         "role": role,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=2)
     }
-    token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
-    return token
+    return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
+
+
+@app.route("/test-db")
+def test_db():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT NOW()")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return jsonify({"db_time": str(result[0])})
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 
 @app.route("/register", methods=["POST"])
 def register():
-    """
-    JSON body: { "username": "...", "password": "...", "email": "..." }
-    """
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
@@ -81,7 +75,6 @@ def register():
     if not username or not password or not email:
         return jsonify({"error": "username, password, email 모두 필요합니다."}), 400
 
-    # 비밀번호 해시
     pw_hash = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
 
     conn = get_db_connection()
@@ -94,8 +87,7 @@ def register():
         )
         conn.commit()
         new_id = cursor.lastrowid
-    except mysql.connector.errors.IntegrityError as e:
-        # username이나 email이 중복된 경우 예외 발생
+    except mysql.connector.errors.IntegrityError:
         conn.rollback()
         return jsonify({"error": "이미 존재하는 username 또는 email입니다."}), 409
     finally:
@@ -103,6 +95,7 @@ def register():
         conn.close()
 
     return jsonify({"message": "회원가입 성공", "user_id": new_id}), 201
+
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -116,16 +109,16 @@ def login():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-
-        cursor.execute("SELECT id, username, password_hash, role FROM users WHERE username=%s", (username,))
+        cursor.execute(
+            "SELECT id, username, password_hash, role FROM users WHERE username=%s",
+            (username,)
+        )
         user = cursor.fetchone()
-
         cursor.close()
         conn.close()
 
         if not user:
             return jsonify({"error": "유저 정보를 찾을 수 없습니다."}), 404
-
         if not checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
             return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 401
 
@@ -133,17 +126,11 @@ def login():
         return jsonify({"message": "로그인 성공", "access_token": token}), 200
 
     except Exception as e:
-        import traceback
-        return jsonify({
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }), 500
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 
 @app.route("/profile", methods=["GET"])
 def profile():
-    """
-    예시: Authorization: Bearer <JWT>
-    """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
@@ -151,7 +138,7 @@ def profile():
     token = auth_header.split(" ")[1]
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
-        # 예시 리턴: 사용자 정보
+        # 이메일을 포함하려면 DB 조회 또는 token에 email 포함 필요
         return jsonify({
             "user_id": decoded["sub"],
             "username": decoded["username"],
@@ -161,6 +148,106 @@ def profile():
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+
+
+@app.route("/api/user/profile", methods=["PUT"])
+def update_profile():
+    # 1) 인증
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
+    token = auth_header.split(" ")[1]
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "토큰이 만료되었습니다."}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+
+    user_id = decoded["sub"]
+
+    # 2) 요청 데이터 파싱
+    data = request.get_json()
+    username = data.get("username")
+    email    = data.get("email")
+    password = data.get("password", None)
+
+    if not username or not email:
+        return jsonify({"error": "username과 email은 필수입니다."}), 400
+
+    # 3) DB 업데이트
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # username, email
+        cursor.execute(
+            "UPDATE users SET username=%s, email=%s WHERE id=%s",
+            (username, email, user_id)
+        )
+        # password 변경 시
+        if password:
+            pw_hash = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
+            cursor.execute(
+                "UPDATE users SET password_hash=%s WHERE id=%s",
+                (pw_hash, user_id)
+            )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+    return jsonify({"message": "프로필이 업데이트되었습니다."}), 200
+
+
+@app.route("/api/user/categories", methods=["GET", "PUT"])
+def user_categories():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "헤더에 Bearer 토큰이 필요합니다."}), 401
+    token = auth_header.split(" ")[1]
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "토큰이 만료되었습니다."}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+
+    user_id = decoded["sub"]
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    if request.method == "GET":
+        # 예시: categories를 저장한 테이블에서 불러오세요
+        cursor.execute("SELECT category FROM user_categories WHERE user_id=%s", (user_id,))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify({"categories": [r[0] for r in rows]})
+
+    else:  # PUT
+        data = request.get_json()
+        categories = data.get("categories", [])
+        # 기존 카테고리 삭제 & 새로 저장 로직
+        try:
+            cursor.execute("DELETE FROM user_categories WHERE user_id=%s", (user_id,))
+            for cat in categories:
+                cursor.execute(
+                    "INSERT INTO user_categories (user_id, category) VALUES (%s, %s)",
+                    (user_id, cat)
+                )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            cursor.close()
+            conn.close()
+
+        return jsonify({"message": "카테고리가 업데이트되었습니다."}), 200
+
 
 if __name__ == "__main__":
     # 로컬 테스트용
