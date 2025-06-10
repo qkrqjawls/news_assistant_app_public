@@ -265,7 +265,7 @@ def list_issues():
                           description,
                           content,
                           pub_date,
-                          image_url         -- 여기에 image_url 추가
+                          image_url
                         FROM news_articles
                        WHERE article_id = %s
                     """, (art_id,))
@@ -273,18 +273,19 @@ def list_issues():
                     if row:
                         link, article_id, title, description, content, pub_date, image_url = row
                         related_news.append({
-                            "link" : link,
+                            "link": link,
                             "article_id": article_id,
                             "title": title,
                             "description": description,
                             "content": content,
                             "published_at": pub_date.isoformat() if hasattr(pub_date, 'isoformat') else str(pub_date),
-                            "image_url": image_url    # JSON에도 포함
+                            "image_url": image_url
                         })
 
             issues.append({
                 "id": iid,
                 "date": dt.isoformat(),
+                "pub_date": dt.isoformat(),       # 추가된 pub_date 필드
                 "issue_name": name,
                 "summary": summary,
                 "related_news": related_news
@@ -297,6 +298,7 @@ def list_issues():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 
 @app.route('/click-event', methods=['POST'])
 def click_event():
