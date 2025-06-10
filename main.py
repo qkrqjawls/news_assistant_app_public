@@ -271,8 +271,9 @@ def list_issues():
                     """, (art_id,))
                     row = cursor.fetchone()
                     if row:
-                        article_id, title, description, content, pub_date, image_url = row
+                        link, article_id, title, description, content, pub_date, image_url = row
                         related_news.append({
+                            "link" : link,
                             "article_id": article_id,
                             "title": title,
                             "description": description,
@@ -328,7 +329,7 @@ def click_event():
 
     cursor.close()
     conn.close()
-    
+
     return jsonify({"message": "클릭 이벤트 전달 성공"}), 200
 
 if __name__ == "__main__":
