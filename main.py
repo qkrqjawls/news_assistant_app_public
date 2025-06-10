@@ -255,7 +255,7 @@ def list_issues():
         for iid, dt, name, summary, related_list in issue_rows:
             related_news = []
             if related_list:
-                for art_id in related_list.split(','):
+                for art_id in related_list.split():
                     cursor.execute("""
                         SELECT
                           article_id,
