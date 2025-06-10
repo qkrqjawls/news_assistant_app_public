@@ -8,7 +8,7 @@ from bcrypt import hashpw, gensalt, checkpw
 import jwt
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True, origins="*")
+CORS(app, supports_credentials=True, origins=["https://newsassistantsasa.com"])
 
 # 환경변수 설정
 DB_USER   = os.environ.get("DB_USER", "appuser")
