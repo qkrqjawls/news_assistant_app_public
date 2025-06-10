@@ -259,6 +259,7 @@ def list_issues():
                 for art_id in related_list.split():
                     cursor.execute("""
                         SELECT
+                          link,
                           article_id,
                           title,
                           description,
