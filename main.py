@@ -145,7 +145,7 @@ def profile():
     except jwt.ExpiredSignatureError:
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
-        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+        return jsonify({"error": "유효하지 않은 토큰입니다.", "token" : token}), 401
     user_id = decoded['sub']
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
