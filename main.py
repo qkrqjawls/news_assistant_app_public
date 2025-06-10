@@ -296,6 +296,39 @@ def list_issues():
         traceback.print_exc()
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
+@app.route('/click-event', methods=['POST'])
+def click_event():
+    token = request.cookies.get("access_token")
+    if not token:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "토큰이 만료되었습니다."}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+    user_id = int(decoded['sub'])
+
+    Q = request.get_json(silent=True) or {}
+
+    issue_id = Q.get("issue_id")
+    
+    if not issue_id:
+        return jsonify({"error" : "issue_id missing"}), 400
+    
+    issue_id = int(issue_id)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""INSERT INTO custom_events (eventname, user_id, issue_id) VALUES (%s, %s, %s)""", ("click", user_id, issue_id))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+    
+    return jsonify({"message": "클릭 이벤트 전달 성공"}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
