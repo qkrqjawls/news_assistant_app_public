@@ -40,7 +40,7 @@ def generate_jwt(user_id, username, role):
         "sub": str(user_id),
         "username": str(username),
         "role": str(role),
-        "exp": datetime.datetime.now(datetime.timezone.utc)
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
 
