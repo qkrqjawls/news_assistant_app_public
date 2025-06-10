@@ -37,10 +37,10 @@ def get_db_connection():
 # JWT 생성 함수
 def generate_jwt(user_id, username, role):
     payload = {
-        "sub": user_id,
-        "username": username,
-        "role": role,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=2)
+        "sub": str(user_id),
+        "username": str(username),
+        "role": str(role),
+        "exp": datetime.datetime.now(datetime.timezone.utc)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
 
@@ -146,7 +146,7 @@ def profile():
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "유효하지 않은 토큰입니다.", "token" : token}), 401
-    user_id = decoded['sub']
+    user_id = int(decoded['sub'])
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT username, email, role FROM users WHERE id=%s", (user_id,))
@@ -169,7 +169,7 @@ def update_profile():
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
-    user_id = decoded['sub']
+    user_id = int(decoded['sub'])
     data = request.get_json() or {}
     username = data.get("username")
     email    = data.get("email")
@@ -206,7 +206,7 @@ def user_categories():
         return jsonify({"error": "토큰이 만료되었습니다."}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
-    user_id = decoded['sub']
+    user_id = int(decoded['sub'])
     conn = get_db_connection()
     cursor = conn.cursor()
     if request.method == 'GET':
