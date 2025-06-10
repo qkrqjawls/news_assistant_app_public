@@ -122,7 +122,7 @@ def login():
         resp = make_response(jsonify({"message": "로그인 성공"}), 200)
         resp.set_cookie("access_token", token,
                         max_age=2*3600, httponly=True,
-                        secure=True, samesite="Strict", path="/")
+                        secure=True, samesite="None", path="/")
         return resp
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
