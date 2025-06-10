@@ -131,7 +131,8 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     resp = make_response(jsonify({"message": "로그아웃 성공"}), 200)
-    resp.set_cookie("access_token", "", max_age=0, path="/")
+    resp.set_cookie("access_token", "", max_age=0, httponly=True,
+                secure=True, samesite="None", path="/")
     return resp
 
 # 프로필 조회
