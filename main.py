@@ -231,18 +231,16 @@ def user_categories():
         conn.close()
     return jsonify({"message": "카테고리 업데이트 성공"}), 200
 
-# 이슈 + 상세 뉴스 조회
 @app.route("/api/issues", methods=["GET"])
 def list_issues():
     try:
-        # 1) limit/offset 파싱
+        # limit/offset 파싱
         try:
             limit = int(request.args.get("limit", 20))
             offset = int(request.args.get("offset", 0))
         except ValueError:
             return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
 
-        # 2) issues 조회
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -254,25 +252,31 @@ def list_issues():
         issue_rows = cursor.fetchall()
 
         issues = []
-        # 3) 관련 뉴스 상세 조회 (news_articles 테이블 사용)
         for iid, dt, name, summary, related_list in issue_rows:
             related_news = []
             if related_list:
                 for art_id in related_list.split(','):
                     cursor.execute("""
-                        SELECT article_id, title, description, content, pub_date
-                          FROM news_articles
-                         WHERE article_id = %s
+                        SELECT
+                          article_id,
+                          title,
+                          description,
+                          content,
+                          pub_date,
+                          image_url         -- 여기에 image_url 추가
+                        FROM news_articles
+                       WHERE article_id = %s
                     """, (art_id,))
                     row = cursor.fetchone()
                     if row:
-                        article_id, title, description, content, pub_date = row
+                        article_id, title, description, content, pub_date, image_url = row
                         related_news.append({
                             "article_id": article_id,
                             "title": title,
                             "description": description,
                             "content": content,
-                            "published_at": pub_date.isoformat() if hasattr(pub_date, 'isoformat') else str(pub_date)
+                            "published_at": pub_date.isoformat() if hasattr(pub_date, 'isoformat') else str(pub_date),
+                            "image_url": image_url    # JSON에도 포함
                         })
 
             issues.append({
