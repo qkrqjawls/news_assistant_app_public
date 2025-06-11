@@ -86,7 +86,7 @@ def register():
     username   = data.get("username")
     password   = data.get("password")
     email      = data.get("email")
-    categories = data.get("categories", [])
+    categories = data.get("categorieses", [])
     if not username or not password or not email:
         return jsonify({"error": "username, password, email 모두 필요합니다."}), 400
 
@@ -99,16 +99,7 @@ def register():
             "INSERT INTO users (username, password_hash, email) VALUES (%s, %s, %s)",
             (username, pw_hash, email)
         )
-        conn.commit()
         user_id = cursor.lastrowid
-
-        # (레거시) user_categories 테이블 삽입 유지 시:
-        for cat in categories:
-            cursor.execute(
-                "INSERT INTO user_categories (user_id, category) VALUES (%s, %s)",
-                (user_id, cat)
-            )
-        conn.commit()
 
         # 선택된 카테고리를 12차원 벡터로 저장
         vec = make_vec(categories)
