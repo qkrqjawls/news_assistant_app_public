@@ -6,6 +6,8 @@ from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
+import numpy as np
+import io
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True, origins=["https://newsassistantsasa.com", "http://localhost:8080"])
@@ -57,6 +59,19 @@ def test_db():
         return jsonify({"db_time": str(now)})
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+def arr_to_blob(arr : np.ndarray):
+    binary = io.BytesIO()
+    np.save(binary, arr)
+    binary_value = binary.getvalue()
+    return binary_value
+
+def load_ndarray(blob: bytes) -> np.ndarray:
+    if not blob:
+        return None
+    buf = io.BytesIO(blob)
+    buf.seek(0)
+    return np.load(buf, allow_pickle=False)
 
 # 회원가입
 @app.route("/register", methods=["POST"])

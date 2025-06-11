@@ -5,3 +5,4 @@ mysql-connector-python
 bcrypt
 PyJWT
 flask_cors
+numpy
