@@ -86,7 +86,7 @@ def register():
     username   = data.get("username")
     password   = data.get("password")
     email      = data.get("email")
-    categories = data.get("categorieses", [])
+    categories = data.get("categories", [])
     if not username or not password or not email:
         return jsonify({"error": "username, password, email 모두 필요합니다."}), 400
 
