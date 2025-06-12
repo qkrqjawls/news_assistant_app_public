@@ -354,5 +354,87 @@ def click_event():
 
     return jsonify({"message": "클릭 이벤트 전달 성공"}), 200
 
+@app.route("/api/issues/recommended", methods=["GET"])
+def list_recommended_issues():
+    # 1) JWT에서 user_id 추출
+    token = request.cookies.get("access_token")
+    if not token:
+        return jsonify({"error": "로그인이 필요합니다."}), 401
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "토큰이 만료되었습니다."}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "유효하지 않은 토큰입니다."}), 401
+    user_id = int(decoded['sub'])
+
+    # 2) limit, offset 파싱
+    try:
+        limit  = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        return jsonify({"error": "limit, offset은 정수여야 합니다."}), 400
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 3) 이슈와 추천 점수를 LEFT JOIN, score DESC → date DESC 정렬
+        cursor.execute("""
+            SELECT
+              i.id, i.`date`, i.issue_name, i.summary, i.related_news_list,
+              COALESCE(r.score, 0) AS score
+            FROM issues i
+            LEFT JOIN user_recommendations r
+              ON r.issue_id = i.id AND r.user_id = %s
+            ORDER BY score DESC, i.`date` DESC
+            LIMIT %s OFFSET %s
+        """, (user_id, limit, offset))
+
+        rows = cursor.fetchall()
+
+        # 4) 결과 가공
+        issues = []
+        for iid, dt, name, summary, related_list, score in rows:
+            related_news = []
+            if related_list:
+                for art_id in related_list.split():
+                    cursor.execute("""
+                        SELECT link, article_id, title, description, content,
+                               pub_date, image_url
+                          FROM news_articles
+                         WHERE article_id = %s
+                    """, (art_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        link, article_id, title, description, content, pub_date, image_url = row
+                        related_news.append({
+                            "link": link,
+                            "article_id": article_id,
+                            "title": title,
+                            "description": description,
+                            "content": content,
+                            "published_at": pub_date.isoformat(),
+                            "image_url": image_url
+                        })
+
+            issues.append({
+                "id": iid,
+                "date": dt.isoformat(),
+                "issue_name": name,
+                "summary": summary,
+                "related_news": related_news,
+                "score": float(score)  # JSON 직렬화 위해 float
+            })
+
+        cursor.close()
+        conn.close()
+        return jsonify(issues), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
