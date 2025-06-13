@@ -325,6 +325,60 @@ def list_issues():
         traceback.print_exc()
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
+@app.route("/api/issues/<int:issue_id>", methods=["GET"])
+def get_issue(issue_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # 1건만 조회
+        cursor.execute("""
+            SELECT id, `date`, issue_name, summary, related_news_list
+              FROM issues
+             WHERE id = %s
+        """, (issue_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"error": "Not Found"}), 404
+
+        iid, dt, name, summary, related_list = row
+        related_news = []
+        if related_list:
+            for art_id in related_list.split():
+                cursor.execute("""
+                    SELECT link, article_id, title, description,
+                           content, pub_date, image_url
+                      FROM news_articles
+                     WHERE article_id = %s
+                """, (art_id,))
+                r = cursor.fetchone()
+                if r:
+                    link, aid, title, desc, content, pub_date, img = r
+                    related_news.append({
+                        "link": link,
+                        "article_id": aid,
+                        "title": title,
+                        "description": desc,
+                        "content": content,
+                        "published_at": pub_date.isoformat(),
+                        "image_url": img
+                    })
+
+        cursor.close()
+        conn.close()
+        return jsonify({
+            "id": iid,
+            "date": dt.isoformat(),
+            "issue_name": name,
+            "summary": summary,
+            "related_news": related_news
+        }), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+
 @app.route('/click-event', methods=['POST'])
 def click_event():
     token = request.cookies.get("access_token")
